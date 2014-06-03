@@ -9,7 +9,7 @@
 
 using namespace cv;
 
-std::string fileSrc = "C:/training/4/0000000000.png";
+std::string fileSrc = "D:/Download/training/2/0000000000.png";
 
 Mat& myFilter(Mat& I)
 {
@@ -79,12 +79,13 @@ int main(int argc, char** argv)
 	bool repause = false;
 
 
-	BackgroundSubtractorMOG2 mog(0, 3, true);
+	BackgroundSubtractorMOG2 mog(0, 2, true);
 	std::vector<std::vector<Point> > contours;
 	std::vector<std::vector<Point> > oldContours;
 	vector<Rect> oldBoundRect;
 	vector<int> zuordnung;
 	vector<int> zuordnungBackup;
+	vector<vector<int>> data; // geschwindigkeit x, geschwindigkeit y, durchschnittliche veränderung der geschwindigkeit in x richtung, durchschnittliche veränderung der geschwindigkeit in y richtung, frame in dem objekt gefunden, fläche zu beginn, klassifizierung 0 = auto, 1 = mensch, 2 = fahrrad
 
 	while (true)
 	{
@@ -97,8 +98,8 @@ int main(int argc, char** argv)
 				std::cout << "End of Sequence" << std::endl;
 				break;
 			}
-
-			frameCounter++;
+			std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
+			//frameCounter++;
 
 			mog.operator()(frame, fore);
 			mog.getBackgroundImage(back);
@@ -128,28 +129,13 @@ int main(int argc, char** argv)
 			{
 				approxPolyDP(Mat(contours[i]), contours_poly[i], 3, true);
 				boundRect[i] = boundingRect(Mat(contours_poly[i]));
-				rectangle(frame, boundRect[i].tl(), boundRect[i].br(), 255, 2, 8, 0);
+				cv::Scalar color = cv::Scalar(128,128,128);
+				//rectangle(frame, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0);
 			}
-
-			/*	vector<int> zuordnung;
-			for(unsigned int i = 0; i < oldContours.size(); i++){
-			double min = 10000;
-			double minIndex = -1;
-			for(unsigned int j = 0; j < contours.size(); j++){
-			double match = cv::matchShapes(oldContours[i], contours[j], CV_CONTOURS_MATCH_I1, 0);
-			if(match < min){
-			min = match;
-			minIndex = j;
-			}
-			}
-			zuordnung.push_back(minIndex);
-
-			} */
-
+			//std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
 			//surjektive zuordnung alter rechtecke zu neuen rechtecken 
-
+			
 			vector<int> zuordnung;
-
 			for(unsigned int i = 0; i < oldBoundRect.size(); i++){
 				if(boundRect.size() == 0) // abbrechen falls keine neuen Rechtecke vorhanden
 					break;
@@ -158,6 +144,23 @@ int main(int argc, char** argv)
 				int minIndex = -1;
 				for(unsigned int j = 0; j < boundRect.size(); j++){
 					int dist = (abs(boundRect[j].tl().x - oldBoundRect[i].tl().x) + abs(boundRect[j].tl().y - oldBoundRect[i].tl().y));
+					
+					//richtung prüfen
+					if(!zuordnungBackup.empty()){
+						int index = -1;
+						for(unsigned int k = 0; k < zuordnungBackup.size(); k++){
+							if(zuordnungBackup[k] == i){
+								index = k;
+								break;
+							}
+						}
+						if(index >= 0){
+							int currentRichtung = boundRect[j].tl().x - oldBoundRect[i].tl().x;
+							if(currentRichtung > 0 && data[index][0] < 0 || currentRichtung < 0 && data[index][0] > 0)
+								continue;
+						}
+					}
+
 					if(dist < min){
 						minIndex = j;
 						min = dist;
@@ -179,6 +182,8 @@ int main(int argc, char** argv)
 				if(multipleMapping.size() == 1)
 					continue;
 
+
+				//konturen miteinander vergleichen und ähnlichste kontur finden
 				int minIndex = -1;
 				double min = 10000;
 				for(unsigned int j = 0; j < multipleMapping.size(); j++){
@@ -203,16 +208,148 @@ int main(int argc, char** argv)
 				}
 			}
 
+			//verdeckungen oder besser gesagt zertrennung
+			for(unsigned int i = 0; i < zuordnung.size(); i++){
+				//break;
+				if(zuordnungBackup.empty())
+					break;
+				if(zuordnung[i] < 0){
+					continue;
+				}
+
+				int index = -1;
+				for(int j = 0; j < zuordnungBackup.size(); j++){
+					if(zuordnungBackup[j] == i){
+						index = j;
+						break;
+					}
+				}
+				if(index == -1)
+					continue;
+
+				if(data[index][5] == -1)
+					continue;
+				if(boundRect[zuordnung[i]].width * boundRect[zuordnung[i]].height >= (float)data[index][5])
+					continue;
+
+				vector<int> nichtZugeordnet(boundRect.size());
+				for(unsigned int j = 0; j < zuordnung.size(); j++){
+					if(zuordnung[j] == -1){
+						continue;
+					}
+					nichtZugeordnet[zuordnung[j]] = 1;
+				}
+
+				
+				vector<int> possibleCandidates; // wird alle rechtecke enthalten die nur maximal 50pixel entfernt sind
+				for(unsigned int j = 0; j < nichtZugeordnet.size(); j++){
+					if(nichtZugeordnet[j] == 1) // bereits zugeordnete elemente ignorieren
+						continue;
+					if(abs(boundRect[j].br().x - boundRect[zuordnung[i]].br().x) <= 50 || abs(boundRect[j].br().x - boundRect[zuordnung[i]].tl().x) || abs(boundRect[j].tl().x - boundRect[zuordnung[i]].br().x) || abs(boundRect[j].tl().x - boundRect[zuordnung[i]].tl().x))
+						possibleCandidates.push_back(j);
+				}
+
+				if(possibleCandidates.size() == 0)
+					continue;
+
+				int minX = 10000;
+				int maxX = -10000;
+				int minY = 10000;
+				int maxY = -10000;
+				int minIndex = -1;
+				int minDiff = 100000000;
+				for(int j = 0; j < possibleCandidates.size(); j++){
+					
+					//rechtecke vereinen
+				if(boundRect[zuordnung[i]].tl().x < minX)
+					minX = boundRect[zuordnung[i]].tl().x;
+				if(boundRect[zuordnung[i]].br().x < minX)
+					minX = boundRect[zuordnung[i]].br().x;
+				if(boundRect[possibleCandidates[j]].tl().x < minX)
+					minX = boundRect[possibleCandidates[j]].tl().x;
+				if(boundRect[possibleCandidates[j]].br().x < minX)
+					minX = boundRect[possibleCandidates[j]].br().x;
+
+				
+				if(boundRect[zuordnung[i]].tl().x > maxX)
+					maxX = boundRect[zuordnung[i]].tl().x;
+				if(boundRect[zuordnung[i]].br().x > maxX)
+					maxX = boundRect[zuordnung[i]].br().x;
+				if(boundRect[possibleCandidates[j]].tl().x > maxX)
+					maxX = boundRect[possibleCandidates[j]].tl().x;
+				if(boundRect[possibleCandidates[j]].br().x > maxX)
+					maxX = boundRect[possibleCandidates[j]].br().x;
+
+				
+				if(boundRect[zuordnung[i]].tl().y < minY)
+					minY = boundRect[zuordnung[i]].tl().y;
+				if(boundRect[zuordnung[i]].br().y < minY)
+					minY = boundRect[zuordnung[i]].br().y;
+				if(boundRect[possibleCandidates[j]].tl().y < minY)
+					minY = boundRect[possibleCandidates[j]].tl().y;
+				if(boundRect[possibleCandidates[j]].br().y < minY)
+					minY = boundRect[possibleCandidates[j]].br().y;
+
+				
+				if(boundRect[zuordnung[i]].tl().y > maxY)
+					maxY = boundRect[zuordnung[i]].tl().y;
+				if(boundRect[zuordnung[i]].br().y > maxY)
+					maxY = boundRect[zuordnung[i]].br().y;
+				if(boundRect[possibleCandidates[j]].tl().y > maxY)
+					maxY = boundRect[possibleCandidates[j]].tl().y;
+				if(boundRect[possibleCandidates[j]].br().y > maxY)
+					maxY = boundRect[possibleCandidates[j]].br().y;
+				
+				int flaeche = (maxX - minX) * (maxY - minY);
+				if(flaeche > data[index][5]*1.5)
+					continue;
+
+
+
+				//if(abs(flaeche - data[index][5]) < abs(data[index][5] - boundRect[zuordnung[i]].width * boundRect[zuordnung[i]].height)){
+					boundRect[zuordnung[i]] = cv::Rect(minX, minY, maxX - minX, maxY - minY); //neues vereintes rechteck erstellen
+					boundRect[possibleCandidates[j]].x = -10000;
+					boundRect[possibleCandidates[j]].y = -10000;
+				//}
+					
+
+				}
+					
+			}
+
 			//label an neue rechtecke schreiben
 			for(unsigned int i = 0; i < zuordnung.size(); i++){
-				if(zuordnung[i] < 0)
+				if(zuordnung[i] < 0){
 					continue;
-				if(zuordnungBackup.empty())
+				}
+				
+				cv::Scalar color = cv::Scalar(128,128,128);
+				
+
+				if(zuordnungBackup.empty()){
 					putText(frame, std::to_string(i), cvPoint(boundRect[zuordnung[i]].tl().x+50,boundRect[zuordnung[i]].tl().y+50),FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(0,0,250), 1, CV_AA);
+					rectangle(frame, boundRect[zuordnung[i]].tl(), boundRect[zuordnung[i]].br(), color, 2, 8, 0);
+					
+					std::vector<std::vector<Point> > singleContour;
+					singleContour.push_back(contours[zuordnung[i]]);
+					drawContours(frame, singleContour, -1, Scalar(200, 255, 0), 1);
+				}		
 				else{
 					for(unsigned int j = 0; j < zuordnungBackup.size(); j++){
 						if(zuordnungBackup[j] == i){
 							putText(frame, std::to_string(j), cvPoint(boundRect[zuordnung[i]].tl().x+50,boundRect[zuordnung[i]].tl().y+50),FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(0,0,250), 1, CV_AA);
+
+							if(data[j][6] == 0)
+								color = cv::Scalar(0,0,255);
+							if(data[j][6] == 1)
+								color = cv::Scalar(255,0,0);
+							if(data[j][6] == 2)
+								color = cv::Scalar(0,255,0);
+
+							std::vector<std::vector<Point> > singleContour;
+							singleContour.push_back(contours[zuordnung[i]]);
+							drawContours(frame, singleContour, -1, Scalar(200, 255, 0), 1);
+							rectangle(frame, boundRect[zuordnung[i]].tl(), boundRect[zuordnung[i]].br(), color, 2, 8, 0);
 						}
 
 					}
@@ -224,12 +361,24 @@ int main(int argc, char** argv)
 			for(unsigned int i = 0; i < zuordnungBackup.size(); i++){
 				if(zuordnungBackup[i] == -1){
 					zuordnung2.push_back(-1);
+		
 					continue;
 				}
-				if(((int)zuordnung.size())-1 < zuordnungBackup[i])
+				if(((int)zuordnung.size())-1 < zuordnungBackup[i]){
+					zuordnung2.push_back(-1);
+
 					continue;
+				}
+					
 				zuordnung2.push_back(zuordnung[zuordnungBackup[i]]);
+
+				
+
 			}
+			
+
+
+			//neue objekte zu zuordnung2 hinzufügen
 			for(unsigned int i = 0; i < zuordnung.size(); i++){
 				if(zuordnungBackup.empty())
 					break;
@@ -240,20 +389,203 @@ int main(int argc, char** argv)
 						break;
 					}
 				}
-				if(found == false)
+				if(found == false){
 					zuordnung2.push_back(zuordnung[i]);
+				}
 			}
 
 			if(zuordnungBackup.empty())
 				zuordnung2 = zuordnung;
 
+			zuordnungBackup = zuordnung2;
 
+
+			//data erstellen bzw. updaten
+			for(unsigned int i = 0; i < zuordnungBackup.size(); i++){
+				
+				//falls neues objekt
+				if(i >= data.size()){
+
+				//falls verlorenes object
+				if(zuordnungBackup[i] == -1){
+					vector<int> newData;
+					newData.push_back(0); // x richtung
+					newData.push_back(0); // y richtung
+					newData.push_back(0); // durchschnitt veränderung x
+					newData.push_back(0); // durchschnitt veränderung y
+					newData.push_back(0); // frame 
+					newData.push_back(0); // fläche
+					newData.push_back(-1); // klassifizierung
+					data.push_back(newData);
+					continue;
+				}
+
+					vector<int> newData;
+					int index = -1;
+					for(unsigned int j = 0; j < zuordnung.size(); j++){
+						if(zuordnung[j] == zuordnungBackup[i]){
+							index = j;
+							break;
+						}
+					}
+					newData.push_back(boundRect[zuordnungBackup[i]].tl().x - oldBoundRect[index].tl().x); // x richtung
+					newData.push_back(boundRect[zuordnungBackup[i]].tl().y - oldBoundRect[index].tl().y); // y richtung
+					newData.push_back(0); // durchschnitt veränderung x
+					newData.push_back(0); // durchschnitt veränderung y
+					newData.push_back(sequence.get(CV_CAP_PROP_POS_FRAMES)); // frame
+
+					
+					if(boundRect[zuordnungBackup[i]].br().x >= sequence.get(CV_CAP_PROP_FRAME_WIDTH)-1 || boundRect[zuordnungBackup[i]].tl().x <= 1)
+						newData.push_back(-1); // objekt außerhalb des bildes
+					else
+						newData.push_back(oldBoundRect[index].area()); // fläche
+				
+					newData.push_back(-1); // klassifizierung
+
+					data.push_back(newData);
+					continue;
+				}
+				
+			//ansonsten updaten
+				if(zuordnungBackup[i] == -1)
+					continue;
+
+					int index = -1;
+					for(unsigned int j = 0; j < zuordnung.size(); j++){
+						if(zuordnung[j] == zuordnungBackup[i]){
+							index = j;
+							break;
+						}
+					}
+			
+				int newRichtungX = boundRect[zuordnungBackup[i]].tl().x - oldBoundRect[index].tl().x;
+				int newRichtungY = abs(boundRect[zuordnungBackup[i]].tl().y - oldBoundRect[index].tl().y);
+				int alterDurchschnittX = data[i][2];
+				int neuerDurchschnittX = (((alterDurchschnittX * ((sequence.get(CV_CAP_PROP_POS_FRAMES)-1) - data[i][4])) + (newRichtungX - data[i][0])) / (sequence.get(CV_CAP_PROP_POS_FRAMES) - data[i][4]));
+				int neuerDurchschnittX2 = (((alterDurchschnittX * ((sequence.get(CV_CAP_PROP_POS_FRAMES)-1) - data[i][4])) + (abs(abs(newRichtungX) - data[i][0]))) / (sequence.get(CV_CAP_PROP_POS_FRAMES) - data[i][4]));
+				int alterDurchschnittY = data[i][3];
+				int neuerDurchschnittY = (((alterDurchschnittY * ((sequence.get(CV_CAP_PROP_POS_FRAMES)-1) - data[i][4])) + (abs(newRichtungY - data[i][1]))) / (sequence.get(CV_CAP_PROP_POS_FRAMES) - data[i][4]));
+				data[i][0] = newRichtungX;
+				data[i][1] = newRichtungY;
+				data[i][2] = neuerDurchschnittX;
+				data[i][2] = 0;
+				data[i][3] = neuerDurchschnittY;
+
+				//if(i == 211 || i == 252 || i == 294 || i == 236 ||  i == 265){
+			
+
+				
+				if(boundRect[zuordnungBackup[i]].br().x >= sequence.get(CV_CAP_PROP_FRAME_WIDTH)-1 || boundRect[zuordnungBackup[i]].tl().x <= 1)
+					continue;
+				
+				//fläche berechnen falls noch nicht geschehen
+				if(data[i][5] == -1)
+					data[i][5] = boundRect[zuordnungBackup[i]].width * boundRect[zuordnungBackup[i]].height;
+
+
+				//klassifizierung 
+				float fahrzeug = 0.0;
+				float mensch = 0.0;
+				float fahrrad = 0.0;
+
+
+				//x-änderung mit einbeziehen
+				if(neuerDurchschnittX2 < 10){
+					fahrzeug += 0.71;
+					mensch += 0.81;
+					fahrrad += 0.57;
+				}
+				if(neuerDurchschnittX2 < 20){
+					fahrzeug += 0.1;
+					mensch += 0.09;
+					fahrrad += 0.22;
+				}
+				if(neuerDurchschnittX2 < 30){
+					fahrzeug += 0.04;
+					mensch += 0.045;
+					fahrrad += 0.125;
+				}
+				if(neuerDurchschnittX2 < 40){
+					fahrzeug += 0.02;
+					mensch += 0.01;
+					fahrrad += 0.025;
+				}
+				if(neuerDurchschnittX2 < 50){
+					fahrzeug += 0.02;
+					mensch += 0.01;
+					fahrrad += 0.025;
+				}
+				if(neuerDurchschnittX2 >= 50){
+					fahrzeug += 0.07;
+					mensch += 0.01;
+					fahrrad += 0.025;
+				}
+
+				//breiten / höhe verhältnis
+				double relation = (double)((double)boundRect[zuordnungBackup[i]].width / (double)boundRect[zuordnungBackup[i]].height)*100;
+				if(relation >= 170)
+					fahrzeug += 0.73;
+				if(relation >= 150 && relation < 170)
+					fahrzeug += 0.05;
+				if(relation >= 120 && relation < 150){
+					fahrzeug += 0.07;
+					fahrrad += 0.8;
+				}
+				if(relation < 120){
+					fahrzeug += 0.13;
+					fahrrad += 0.2;
+					mensch += 0.4;
+				}
+				if(relation >= 120 && relation < 170)
+					mensch += 0.6;
+				if(relation < 50)
+					mensch += 0.48;
+
+				//y änderung einbeziehn
+				if(neuerDurchschnittY == 0){
+					fahrzeug += 0.3;
+					mensch += 0.22;
+					fahrrad += 0.175;
+				}
+				if(neuerDurchschnittY == 1){
+					fahrzeug += 0.18;
+					mensch += 0.09;
+					fahrrad += 0.15;
+				}
+				if(neuerDurchschnittY == 2){
+					fahrzeug += 0.09;
+					mensch += 0.07;
+					fahrrad += 0.12;
+				}
+				if(neuerDurchschnittY > 2){
+					fahrzeug += 0.03;
+					mensch += 0.04;
+					fahrrad += 0.05;
+				}
+
+
+				if(data[i][6] == 0){
+					fahrzeug += 0.5;
+				}
+				if(data[i][6] == 1){
+					mensch += 0.5;
+				}
+				if(data[i][6] == 2){
+					fahrrad += 0.5;
+				}
+
+				if(fahrzeug >= mensch && fahrzeug >= fahrrad)
+					data[i][6] = 0;
+				else if (mensch >= fahrzeug && mensch >= fahrrad)
+					data[i][6] = 1;
+				else if (fahrrad >= fahrzeug && fahrrad >= mensch)
+					data[i][6] = 2;
+			}
 
 			oldBoundRect = boundRect;
 			oldContours = contours;
-			zuordnungBackup = zuordnung2;
 
-			drawContours(frame, contours, -1, Scalar(200, 255, 0), 1);
+			
 
 			int finish = cvGetTickCount();
 			int duration = (int)(cvGetTickFrequency() * 1.0e6) / (finish - start);

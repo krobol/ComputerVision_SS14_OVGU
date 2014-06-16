@@ -9,9 +9,9 @@
 
 using namespace cv;
 
-std::string fileSrc = "D:/Download/training/2/0000000000.png";
+std::string fileSrc = "C:/training/3/0000000000.png";
 
-Mat& myFilter(Mat& I)
+Mat& SaltPepperFilter(Mat& I, int c)
 {
 	// accept only char type matrices
 	CV_Assert(I.depth() != sizeof(uchar));
@@ -27,26 +27,28 @@ Mat& myFilter(Mat& I)
 		nRows = 1;
 	}
 
-	int i, j;
+	int n, i, j;
 	uchar* p;
-	for (i = 0; i < nRows; ++i)
+	for (n = 0; n < c; n++)
 	{
-		p = I.ptr<uchar>(i);
-		for (j = 0; j < nCols; ++j)
+		for (i = 0; i < nRows; ++i)
 		{
-			if (p[j] > 0 && ((p[j - 1] < 255 && p[j + 1] < 255) || (p[j - 1] < 255 && p[j + 2] < 255) || (p[j - 2] < 255 && p[j + 1] < 255) || (p[j - 2] < 255 && p[j + 2] < 255)))
+			p = I.ptr<uchar>(i);
+			for (j = 0; j < nCols; ++j)
 			{
-				p[j] = 0;
-			}
-			if (p[j] == 127) {
-				p[j] = 0;
+				if (p[j] > 0 && ((p[j - 1] < 255 && p[j + 1] < 255) || (p[j - 2] < 255 && p[j + 2] < 255)))
+				{
+					p[j] = 0;
+				}
+				if (p[j] == 127) {
+					p[j] = 0;
+				}
 			}
 		}
 	}
 
 	return I;
 }
-
 
 // prints a string in the upper left corner of the matrix
 void printStats(Mat matrix, std::string str) {
@@ -65,21 +67,26 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	Mat frame;	// current frame
-	Mat back;	// background image
-	Mat fore;	// foreground mask
-	Mat clean;	// clean foreground
-	Mat mask;	// mask for cleaner foreground
+	Mat frame;			// current frame
+	Mat uniform;		// frame with uniform intensity
+	Mat back;			// background image
+	Mat fore;			// foreground mask
+	Mat mask;			// mask for cleaner foreground
+	Mat denoised;		// foreground mask with less noise		
+	Mat prev;			// previous frame's denoised foreground mask
+	Mat deartifacted;	// foreground mask with less lighting artifacts
+	Mat result;			// result of all image processing
 
 	vector<Mat> channels;
-	int frameCounter = 0;
+	vector<Mat> bg_channels;
+
 	bool halt = false;
 
 	bool pause = false;
 	bool repause = false;
 
 
-	BackgroundSubtractorMOG2 mog(0, 2, true);
+	BackgroundSubtractorMOG2 mog(0, 3, true);
 	std::vector<std::vector<Point> > contours;
 	std::vector<std::vector<Point> > oldContours;
 	vector<Rect> oldBoundRect;
@@ -98,28 +105,50 @@ int main(int argc, char** argv)
 				std::cout << "End of Sequence" << std::endl;
 				break;
 			}
-			std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
-			//frameCounter++;
 
-			mog.operator()(frame, fore);
+			//std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
+
+			cvtColor(frame, uniform, CV_BGR2HSV);
+			split(uniform, channels);
+
+			channels[2] = Mat::zeros(frame.size[0], frame.size[1], CV_8UC1);	// Helligkeit = 0
+
+			merge(channels, uniform);
+
+			mog.operator()(uniform, fore);
 			mog.getBackgroundImage(back);
 
-			fore.copyTo(clean);
-			clean = myFilter(clean);
+			fore.copyTo(mask);
 
-			clean.copyTo(mask);
-			erode(mask, mask, Mat::ones(3, 3, CV_8UC1));
-			dilate(mask, mask, Mat::ones(10, 10, CV_8UC1));
+			SaltPepperFilter(mask, 3);
+			erode(mask, mask, Mat::ones(3, 6, CV_8UC1));
+			dilate(mask, mask, Mat::ones(15, 15, CV_8UC1));
 
-			clean = mask.mul(clean);
+			denoised = fore & mask;
+			GaussianBlur(denoised, denoised, Size(9, 9), 0, 0);
+			threshold(denoised, denoised, 200, 255, THRESH_BINARY);
+
+			if (!prev.empty())
+			{
+				deartifacted = prev & denoised;
+			}
+			else
+			{
+				deartifacted = Mat::ones(frame.size[0], frame.size[1], CV_8UC1);
+			}
+
+			denoised.copyTo(prev);
+			dilate(deartifacted, deartifacted, Mat::ones(20, 120, CV_8UC1));
+
+			result = denoised & deartifacted;
 
 			std::vector<std::vector<Point> > contours;
-			findContours(clean, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+			findContours(result, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+
 			for(int i = contours.size()-1; i > -1; i--){
 				if(contours[i].size() < 150)
 					contours.erase(contours.begin()+i);
 			}
-
 
 			vector<vector<Point> > contours_poly(contours.size());
 			vector<Rect> boundRect(contours.size());
@@ -129,10 +158,20 @@ int main(int argc, char** argv)
 			{
 				approxPolyDP(Mat(contours[i]), contours_poly[i], 3, true);
 				boundRect[i] = boundingRect(Mat(contours_poly[i]));
-				cv::Scalar color = cv::Scalar(128,128,128);
-				//rectangle(frame, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0);
+
+				// erase all objects that are thinner than a certain threshold
+				// TODO: Exclude cases where Rectangle is thin because of cut off at the frame's edges
+				if (boundRect[i].height / boundRect[i].width > 5)
+				{
+					contours.erase(contours.begin() + i);
+					boundRect.erase(boundRect.begin() + i);
+				}
+
+				rectangle(frame, boundRect[i].tl(), boundRect[i].br(), 255, 2, 8, 0);
+
 			}
 			//std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
+			
 			//surjektive zuordnung alter rechtecke zu neuen rechtecken 
 			
 			vector<int> zuordnung;
@@ -589,10 +628,9 @@ int main(int argc, char** argv)
 
 			int finish = cvGetTickCount();
 			int duration = (int)(cvGetTickFrequency() * 1.0e6) / (finish - start);
-			printStats(fore, "#" + std::to_string(frameCounter) + " | " + std::to_string(duration) + " FPS");
+			printStats(frame, "#" + std::to_string((int)sequence.get(CV_CAP_PROP_POS_FRAMES)) + " | " + std::to_string(duration) + " FPS");
 
 			imshow("output | q or esc to quit | spacebar to pause | +/- to go to next/prev frame", frame);
-			//imshow("foreground | q or esc to quit | spacebar to pause | +/- to go to next/prev frame", fore);
 
 			if (repause){
 				repause = false;

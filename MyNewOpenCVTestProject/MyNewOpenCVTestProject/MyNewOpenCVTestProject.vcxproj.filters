@@ -15,10 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="klassifikation.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
-    <ClCompile Include="klassifikation.cpp">
+    <ClCompile Include="mainMeins.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
   </ItemGroup>

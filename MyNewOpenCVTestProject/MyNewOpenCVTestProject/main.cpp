@@ -995,8 +995,10 @@ int main(int argc, char** argv)
 
 					klasse.push_back(-1);
 					newData.push_back(klasse); // klassifizierung
-
 					data.push_back(newData);
+					if(data[data.size()-1][5][0] != -1)
+						klassifikation(boundRect[zuordnungBackup[i]], data.size()-1, data);
+
 					continue;
 				}
 

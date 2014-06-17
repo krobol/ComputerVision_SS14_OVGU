@@ -9,7 +9,7 @@
 
 using namespace cv;
 
-std::string fileSrc = "D:/Download/training/1/0000000000.png";
+std::string fileSrc = "D:/Download/training/7/0000000000.png";
 
 Mat& SaltPepperFilter(Mat& I, int c)
 {
@@ -436,13 +436,13 @@ void klassifikation(cv::Rect objectToClassify, int dataIndex, vector<vector<vect
 	}
 
 	if(data[dataIndex][6][0] == 0){
-		fahrzeug += 0.6;
+		fahrzeug += 0.5;
 	}
 	if(data[dataIndex][6][0] == 1){
-		mensch += 0.6;
+		mensch += 0.5;
 	}
 	if(data[dataIndex][6][0] == 2){
-		fahrrad += 0.3;
+		fahrrad += 0.5;
 	}
 
 	if(fahrzeug >= mensch && fahrzeug >= fahrrad)
@@ -479,7 +479,12 @@ int main(int argc, char** argv)
 	Mat prev;			// previous frame's denoised foreground mask
 	Mat deartifacted;	// foreground mask with less lighting artifacts
 	Mat result;			// result of all image processing
-	int cAll = 0;
+	
+	Mat phantom;
+	Mat trails;
+	Mat check;
+
+	/*int cAll = 0;
 	int c0 = 0;
 	int c1 = 0;
 	int c2 = 0;
@@ -508,7 +513,7 @@ int main(int argc, char** argv)
 	int c25 = 0;
 	int c26 = 0;
 	int c27 = 0;
-	int c28 = 0;
+	int c28 = 0;*/
 
 	vector<Mat> channels;
 	vector<Mat> bg_channels;
@@ -534,12 +539,17 @@ int main(int argc, char** argv)
 			sequence >> frame;
 			if (frame.empty())
 			{
-
 				std::cout << "End of Sequence" << std::endl;
 				break;
 			}
 
 			//std::cout << sequence.get(CV_CAP_PROP_POS_FRAMES) << std::endl;
+
+			phantom = Mat::zeros(frame.size[0], frame.size[1], CV_32FC3);
+			if (trails.empty()) trails = Mat::zeros(frame.size[0], frame.size[1], CV_32FC3);
+
+
+			///// Background Subtraction /////
 
 			cvtColor(frame, uniform, CV_BGR2HSV);
 			split(uniform, channels);
@@ -550,6 +560,8 @@ int main(int argc, char** argv)
 
 			mog.operator()(uniform, fore);
 			mog.getBackgroundImage(back);
+
+			///// Image Processing /////
 
 			fore.copyTo(mask);
 
@@ -575,11 +587,13 @@ int main(int argc, char** argv)
 
 			result = denoised & deartifacted;
 
+			///// Connected Component Analysis /////
+
 			std::vector<std::vector<Point> > contours;
 			findContours(result, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
 
 			for(int i = contours.size()-1; i > -1; i--){
-				if(contours[i].size() < 150)
+				if(contours[i].size() < 100)
 					contours.erase(contours.begin()+i);
 			}
 
@@ -617,7 +631,7 @@ int main(int argc, char** argv)
 				for(unsigned int j = 0; j < boundRect.size(); j++){
 					int dist = (abs(boundRect[j].tl().x - oldBoundRect[i].tl().x) + abs(boundRect[j].tl().y - oldBoundRect[i].tl().y));
 
-					//richtung pr�fen
+					//richtung pruefen
 					if(!zuordnungBackup.empty()){
 						int index = -1;
 						for(unsigned int k = 0; k < zuordnungBackup.size(); k++){
@@ -655,7 +669,7 @@ int main(int argc, char** argv)
 					continue;
 
 
-				//konturen miteinander vergleichen und �hnlichste kontur finden
+				//konturen miteinander vergleichen und aehnlichste kontur finden
 				int minIndex = -1;
 				double min = 10000;
 				for(unsigned int j = 0; j < multipleMapping.size(); j++){
@@ -679,8 +693,8 @@ int main(int argc, char** argv)
 						break;
 				}
 			}
-							if(sequence.get(CV_CAP_PROP_POS_FRAMES) == 34)
-					c0++;
+						//	if(sequence.get(CV_CAP_PROP_POS_FRAMES) == 34)
+					//c0++;
 			//verdeckungen oder besser gesagt zertrennung
 	
 			for(unsigned int i = 0; i < zuordnung.size(); i++){
@@ -808,10 +822,10 @@ int main(int argc, char** argv)
 				}
 
 			}
-			for(int i = 0; i < boundRect.size(); i++)
+		/*	for(int i = 0; i < boundRect.size(); i++)
 			{
 				rectangle(frame, boundRect[i].tl(), boundRect[i].br(), Scalar(0,0,0), 2, 8, 0);
-			}
+			}*/
 
 			//label an neue rechtecke schreiben
 			for(unsigned int i = 0; i < zuordnung.size(); i++){
@@ -821,7 +835,7 @@ int main(int argc, char** argv)
 								
 				
 
-				cv::Scalar color = cv::Scalar(128,128,128);
+				cv::Scalar color = cv::Scalar(0,0,0);
 
 
 				if(zuordnungBackup.empty()){
@@ -846,9 +860,19 @@ int main(int argc, char** argv)
 							std::vector<std::vector<Point> > singleContour;
 							singleContour.push_back(contours[zuordnung[i]]);
 							
-							if(sequence.get(CV_CAP_PROP_POS_FRAMES) - data[j][4][0] >= 1)
+							Vec3b pixel = check.at<Vec3b>(boundRect[zuordnung[i]].y + (boundRect[zuordnung[i]].height / 2), boundRect[zuordnung[i]].x + (boundRect[zuordnung[i]].width / 2));
+
+							int c = 0;
+							if (pixel[1] + pixel[2] + pixel[3] == 0) c = 4;
+							if (pixel[1] != 0 || pixel[2] != 0 || pixel[3] != 0) c = 3;
+							if (pixel[1] > 0 && pixel[2] > 0 && pixel[3] > 0) c = 2;
+							if (sequence.get(CV_CAP_PROP_POS_FRAMES) < 50) c = 1;
+
+
+							if(sequence.get(CV_CAP_PROP_POS_FRAMES) - data[j][4][0] >= c)
 							{
 								drawContours(frame, singleContour, -1, Scalar(200, 255, 0), 1);
+								drawContours(phantom, singleContour, -1, color, CV_FILLED);
 								rectangle(frame, boundRect[zuordnung[i]].tl(), boundRect[zuordnung[i]].br(), color, 2, 8, 0);
 								putText(frame, std::to_string(j), cvPoint(boundRect[zuordnung[i]].tl().x+50,boundRect[zuordnung[i]].tl().y+50),FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(0,0,250), 1, CV_AA);
 
@@ -860,7 +884,7 @@ int main(int argc, char** argv)
 				}       
 			}
 
-			//alte indizes von backup zu neuen machen damit labels gleich bleiben beim n�chsten frame
+			//alte indizes von backup zu neuen machen damit labels gleich bleiben beim naechsten frame
 			vector<int> zuordnung2;
 			for(unsigned int i = 0; i < zuordnungBackup.size(); i++){
 				if(zuordnungBackup[i] == -1){
@@ -882,7 +906,7 @@ int main(int argc, char** argv)
 
 
 
-			//neue objekte zu zuordnung2 hinzuf�gen
+			//neue objekte zu zuordnung2 hinzufuegen
 			for(unsigned int i = 0; i < zuordnung.size(); i++){
 				if(zuordnungBackup.empty())
 					break;
@@ -919,10 +943,10 @@ int main(int argc, char** argv)
 						minusOne.push_back(-1);
 						newData.push_back(null); // x richtung
 						newData.push_back(null); // y richtung
-						newData.push_back(null); // durchschnitt ver�nderung x
-						newData.push_back(null); // durchschnitt ver�nderung y
+						newData.push_back(null); // durchschnitt veraenderung x
+						newData.push_back(null); // durchschnitt veraenderung y
 						newData.push_back(null); // frame 
-						newData.push_back(null); // fl�che
+						newData.push_back(null); // flaeche
 						newData.push_back(minusOne); // klassifizierung
 						data.push_back(newData);
 						continue;
@@ -952,7 +976,7 @@ int main(int argc, char** argv)
 
 					newData.push_back(xChange); // x richtung
 					newData.push_back(yChange); // y richtung
-					newData.push_back(averageXChange); // durchschnitt ver�nderung x
+					newData.push_back(averageXChange); // durchschnitt veraenderung x
 					newData.push_back(maxYChange); // groesste veraenderung y
 					newData.push_back(frame); // frame
 
@@ -960,13 +984,13 @@ int main(int argc, char** argv)
 					if(boundRect[zuordnungBackup[i]].br().x >= sequence.get(CV_CAP_PROP_FRAME_WIDTH)-1 || boundRect[zuordnungBackup[i]].tl().x <= 1)
 					{
 						flaeche.push_back(-1);
-						newData.push_back(flaeche); // objekt au�erhalb des bildes
+						newData.push_back(flaeche); // objekt ausserhalb des bildes
 
 					}
 					else
 					{
 						flaeche.push_back(oldBoundRect[index].area());
-						newData.push_back(flaeche); // fl�che
+						newData.push_back(flaeche); // flaeche
 					}
 
 					klasse.push_back(-1);
@@ -1017,7 +1041,7 @@ int main(int argc, char** argv)
 
 				//data[i][2][0] = neuerDurchschnittX;
 				//data[i][3][0] = neuerDurchschnittY;
-				if(data[i][5].size() == 3)
+				/*if(data[i][5].size() == 3)
 				{
 				//if(i == 49 || i == 84){ //fahrrad sequenz 7
 				if(i == 138 || i == 165 || i == 194 || i == 178 || i == 209 || i == 181){ //fahrrad sequenz 6
@@ -1096,13 +1120,13 @@ int main(int argc, char** argv)
 						c23++;
 
 				}
-				}
+				}*/
 
 
 				if(boundRect[zuordnungBackup[i]].br().x >= sequence.get(CV_CAP_PROP_FRAME_WIDTH)-1 || boundRect[zuordnungBackup[i]].tl().x <= 1)
 					continue;
 
-				//fl�che berechnen falls noch nicht geschehen
+				//flaeche berechnen falls noch nicht geschehen
 				if(data[i][5][0] == -1)
 					data[i][5][0] = boundRect[zuordnungBackup[i]].width * boundRect[zuordnungBackup[i]].height;
 
@@ -1115,7 +1139,7 @@ int main(int argc, char** argv)
 				float fahrrad = 0.0;
 
 
-				//x-�nderung mit einbeziehen
+				//x-aenderung mit einbeziehen
 				if(neuerDurchschnittX2 < 10){
 				fahrzeug += 0.71;
 				mensch += 0.81;
@@ -1147,7 +1171,7 @@ int main(int argc, char** argv)
 				fahrrad += 0.025;
 				}
 
-				//breiten / h�he verh�ltnis
+				//breiten / hoehe verhaeltnis
 				double relation = (double)((double)boundRect[zuordnungBackup[i]].width / (double)boundRect[zuordnungBackup[i]].height)*100;
 				if(relation >= 170)
 				fahrzeug += 0.73;
@@ -1167,7 +1191,7 @@ int main(int argc, char** argv)
 				if(relation < 50)
 				mensch += 0.48;
 
-				//y �nderung einbeziehn
+				//y aenderung einbeziehn
 				if(neuerDurchschnittY == 0){
 				fahrzeug += 0.3;
 				mensch += 0.22;
@@ -1211,6 +1235,12 @@ int main(int argc, char** argv)
 			oldBoundRect = boundRect;
 			oldContours = contours;
 
+			trails = trails + 0.001 * phantom;
+
+			erode(trails, check, Mat::ones(20, 20, CV_8UC1));
+			dilate(check, check, Mat::ones(20, 25, CV_8UC1));
+
+
 
 
 			int finish = cvGetTickCount();
@@ -1218,7 +1248,7 @@ int main(int argc, char** argv)
 			printStats(frame, "#" + std::to_string((int)sequence.get(CV_CAP_PROP_POS_FRAMES)) + " | " + std::to_string(duration) + " FPS");
 
 			imshow("output | q or esc to quit | spacebar to pause | +/- to go to next/prev frame", frame);
-			//imshow("foreground | q or esc to quit | spacebar to pause | +/- to go to next/prev frame", test);
+			//imshow("paths", check);
 
 			if (repause){
 				repause = false;
@@ -1249,7 +1279,7 @@ int main(int argc, char** argv)
 			break;
 	}
 
-	std::cerr << "c0: " << c0 << std::endl;
+	/*std::cerr << "c0: " << c0 << std::endl;
 	std::cerr << "c1: " << c1 << std::endl;
 	std::cerr << "c2: " << c2 << std::endl;
 	std::cerr << "c3: " << c3 << std::endl;
@@ -1280,7 +1310,7 @@ int main(int argc, char** argv)
 	std::cerr << "c28: " << c28 << std::endl;
 
 
-	std::cerr << "cAll: " << cAll << std::endl;
+	std::cerr << "cAll: " << cAll << std::endl;*/
 
 	return 0;
 }

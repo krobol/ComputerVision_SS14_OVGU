@@ -9,7 +9,7 @@
 
 using namespace cv;
 
-std::string fileSrc = "D:/Download/training/7/0000000000.png";
+std::string fileSrc = "D:/Download/E_test/test/test1/0000000000.png";
 
 Mat& SaltPepperFilter(Mat& I, int c)
 {
@@ -1250,7 +1250,7 @@ int main(int argc, char** argv)
 			printStats(frame, "#" + std::to_string((int)sequence.get(CV_CAP_PROP_POS_FRAMES)) + " | " + std::to_string(duration) + " FPS");
 
 			imshow("output | q or esc to quit | spacebar to pause | +/- to go to next/prev frame", frame);
-			//imshow("paths", check);
+			imshow("paths", check);
 
 			if (repause){
 				repause = false;
